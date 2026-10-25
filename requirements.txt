@@ -1,4 +1,5 @@
 edgar
 pymilvus
+pymilvus[milvus_lite]
 openai
 openai
