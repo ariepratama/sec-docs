@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Milvus vector DB (rebuild with index_to_milvus.py)
+vector/
