@@ -2,4 +2,6 @@ edgar
 pymilvus
 pymilvus[milvus_lite]
 openai
-openai
+streamlit
+python-dotenv
+numpy
