@@ -5,3 +5,4 @@ openai
 streamlit
 python-dotenv
 numpy
+huggingface_hub
