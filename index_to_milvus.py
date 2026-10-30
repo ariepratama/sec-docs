@@ -340,8 +340,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        default="bge-base-en-v1.5",
-        help="Embedding model name",
+        default=os.environ.get("EMBEDDING_MODEL", "bge-base-en-v1.5"),
+        help="Embedding model name (default: $EMBEDDING_MODEL or bge-base-en-v1.5)",
     )
     parser.add_argument(
         "--batch_size",

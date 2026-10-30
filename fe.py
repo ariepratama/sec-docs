@@ -6,6 +6,7 @@ import json
 import logging
 import time
 import numpy as np
+from datetime import date
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
@@ -26,6 +27,7 @@ def get_milvus_client(path: str) -> pymilvus.MilvusClient:
 
 mclient = get_milvus_client(db_path)
 EMBEDDING_URL = os.environ["EMBEDDING_URL"]
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "bge-base-en-v1.5")
 LLM_URL = os.environ["LLM_URL"]
 log.debug("Config: db_path=%s embedding_url=%s llm_url=%s", db_path, EMBEDDING_URL, LLM_URL)
 
@@ -48,7 +50,46 @@ def get_llm_model() -> str:
     return model
 
 
-def embed_text(text: str, model_name: str = "bge-base-en-v1.5", batch_size: int = 16) -> list[list[float]]:
+def decompose_query(query: str) -> dict:
+    prompt = f"""you prepare searches over SEC filings (10-Q),
+    today's date is {date.today()}. if the question is broad (e.g "what is X doing in <year>"), split into 3-6 focused sub-queries
+    covering distinct aspects (e.g AI investments, cloud growth, capex, legal, headcount/restructuring, capital return, outlook/risks, innovation)
+    if the quesiton is narrow and specific return exactly ONE sub-query.
+    User Query: "{query}"
+    Each sub-query must be self-contained, in formal financial terminology, and may
+    have its own period filters (null = no filter).
+Respond ONLY with JSON:
+{{
+  "ticker": "string or null",
+  "broad": true/false,
+  "sub_queries": [
+    {{"query": "string", "start_year": int|null, "end_year": int|null,
+      "start_quarter": int|null, "end_quarter": int|null}}
+  ]
+}}
+"""
+    log.info("decomposing query: %r", query)
+    t0 = time.perf_counter()
+    response = llm_client.chat.completions.create(
+        model=get_llm_model(),
+        messages=[
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.0,
+        response_format={"type": "json_object"}
+    )
+    raw = response.choices[0].message.content
+    log.debug("decomposing raw response: %s", raw)
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        log.exception("decomposing returned invalid JSON: %r", raw)
+        raise
+    log.info("decomposing query in %.3fs: %s", time.perf_counter() - t0, parsed)
+    return parsed
+
+def embed_text(text: str, model_name: str = None, batch_size: int = 16) -> list[list[float]]:
+    model_name = model_name or EMBEDDING_MODEL
     chunks = chunk_text(text)
     log.debug("Embedding query (%d chars, %d chunks) with %s", len(text), len(chunks), model_name)
     query_vectors = get_embeddings(
@@ -305,8 +346,16 @@ if st.button("Analyze & verify"):
         log.info("Request: query=%r sidebar_ticker=%s top_k=%d", query, ticker, top_k)
         with st.spinner("optimizing query..."):
             q = optimize_query(query)
+            # decompose queries into specific topics / sub queries
+            # sub_queries = decompose_query(query)
 
         with st.spinner("embedding query..."):
+            # subs = sub_queries["sub_queries"]
+            # subs = subs[:6]
+            # pool = {}
+            # per_sub_k = max(top_k // len(subs) * 3, 15)
+            # for sq in subs:
+                
             query_vectors = embed_text(query)
 
         with st.spinner("retrieving relevant documents..."):
