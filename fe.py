@@ -19,8 +19,34 @@ log = logging.getLogger("fe")
 db_path = os.environ.get("DB_PATH", "vector/10qvector.db")
 
 
+HF_MILVUS_REPO = os.environ.get("HF_MILVUS_REPO", "ariesutiono/sec-docs-milvus")
+
+
+def ensure_milvus_db(path: str) -> None:
+    """Download the Milvus Lite DB from Hugging Face if it is not on disk.
+
+    The dataset repo holds the contents of `<db_path>/collections` at its root
+    (uploaded with `hf upload <repo> <db_path>/collections collections --repo-type dataset`).
+    """
+    collections_dir = Path(path) / "collections"
+    if collections_dir.is_dir() and any(collections_dir.iterdir()):
+        return
+    from huggingface_hub import snapshot_download
+
+    log.info("Milvus DB not found at %s; downloading from HF dataset %s", path, HF_MILVUS_REPO)
+    snapshot_download(
+        repo_id=HF_MILVUS_REPO,
+        repo_type="dataset",
+        allow_patterns=["collections/**"],
+        local_dir=path,
+        token=os.environ.get("HF_TOKEN") or os.environ.get("SEC_RAG_HF_TOKEN") or None,
+    )
+    log.info("Downloaded Milvus DB to %s", path)
+
+
 @st.cache_resource
 def get_milvus_client(path: str) -> pymilvus.MilvusClient:
+    ensure_milvus_db(path)
     log.info("Opening Milvus client at %s", path)
     return pymilvus.MilvusClient(path)
 
