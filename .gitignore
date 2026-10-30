@@ -224,3 +224,4 @@ vector/
 
 # Production env
 .env.prod
+.env.prod.toml
