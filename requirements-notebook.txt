@@ -1,0 +1,7 @@
+numpy
+huggingface_hub
+jupyter
+bm25s
+pystemmer
+pandas
+datasets

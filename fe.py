@@ -10,9 +10,10 @@ import rag_core  # noqa: E402,F401  (initialises env, logging, clients)
 
 ask = st.Page("views/ask.py", title="Ask", icon="🔎", default=True)
 tickers = st.Page("views/tickers.py", title="Tickers", icon="📋")
-search_embedding_docs = st.Page("views/search_embedding_docs.py", title="Search")
+search_embedding_docs = st.Page("views/search_embedding_docs.py", title="Search", icon="🔎")
+bm25_demo = st.Page("views/bm25_demo.py", title="BM25 demo", icon="🔎")
 
-pg = st.navigation([ask, tickers, search_embedding_docs])
+pg = st.navigation([ask, tickers, search_embedding_docs, bm25_demo])
 
 # Runs on every page, so the sidebar shows on home and subpages.
 with st.sidebar:
