@@ -7,3 +7,5 @@ python-dotenv
 numpy
 huggingface_hub
 datasets
+bm25s
+pandas
