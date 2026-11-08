@@ -3,14 +3,15 @@ import logging
 from datasets import load_dataset
 import pandas as pd
 import bm25s
+from eval_metrics import calculate_metrics, get_avg_metrics, hit_k, recall_k, rr_k
 
 @st.cache_resource(show_spinner="Loading FinanceBench dataset...")
 def get_financebench_dataset():
     return load_dataset("PatronusAI/financebench", split="train")
 
 @st.cache_resource(show_spinner="Loading FinanceBench into index")
-def transform_df(df: pd.DataFrame) -> tuple[list[set[int]], list[str], dict[tuple[str, str], int], dict[int, tuple[str, str]]]:
-    evidences = df["evidence"]
+def transform_df(_df: pd.DataFrame) -> tuple[list[set[int]], list[str], dict[tuple[str, str], int], dict[int, tuple[str, str]]]:
+    evidences = _df["evidence"]
     gold_indices = []
     doc_to_idx = {}
     id_to_doc_meta = {}
@@ -54,9 +55,6 @@ def on_template_change():
     if st.session_state.selected_template:
         st.session_state.query_text = st.session_state.selected_template
 
-def get_avg_metrics():
-    pass
-
 log = logging.getLogger("fe")
 df = get_financebench_dataset().to_pandas()
 gold_indices, corpus, doc_to_idx, id_to_doc_meta = transform_df(df)
@@ -79,10 +77,66 @@ from datasets import load_dataset
 load_dataset("PatronusAI/financebench", split="train")
 ```
 
-Below is a simple simulation of corpus retrieval using [BM25 library](https://github.com/xhluca/bm25s).
+""")
+st.markdown(r"""
+In here, I will use a few evaluation metrics
 
+## 1. Recall@k
+$$ 
+    \text{Recall}@k = \frac{|\text{Retrieved}_{1:k} \cap \text{Relevant}|}{|\text{Relevant}|}
+$$
+Measures the proportion of all relevant evidence documents retrieved within the top-$k$ results. It is effective for verifying that the retriever doesn't leave critical context behind when answers require multiple pages.
+
+
+## 2. Reciprocal Rank (RR@k) & MRR@k
+
+$$
+    \text{RR}@k =  
+        \begin{cases} 
+            \frac{1}{\text{rank}_i} & \text{if } \text{rank}_i \le k \\
+            0 & \text{otherwise}
+        \end{cases}
+$$
+
+$$
+    \text{MRR}@k = \frac{1}{|Q|} \sum_{i=1}^{|Q|} \text{RR}_i@k
+$$
+Measures how high up the *first* relevant document appears, awarding a higher score when it lands near the top. It is effective because LLMs and users heavily prioritize the highest-ranked items and suffer when correct context is buried.
+
+## 3. Hit Rate / Success@k
+$$
+    \text{Hit}@k = 
+        \begin{cases} 
+            1 & \text{if } |\text{Retrieved}_{1:k} \cap \text{Relevant}| > 0 \\
+            0 & \text{otherwise}
+        \end{cases}
+$$
+Measures the percentage of queries that retrieved at least one relevant document in the top-$k$. It is effective as an intuitive baseline to confirm whether the retriever provides any usable answer context at all.
 
 """)
+
+st.subheader("Benchmark Evaluation")
+if st.button("Calculate average metrics (k = 1, 3, 5, 10)"):
+    with st.spinner("Calculating BM25 retrieval metrics across FinanceBench questions..."):
+        k_values = [1, 3, 5, 10]
+        retrieved_indices, _ = search(retriever, all_questions, k=max(k_values))
+        metrics_df = calculate_metrics(retrieved_indices, gold_indices, k_values=k_values)
+        st.session_state["benchmark_summary"] = get_avg_metrics(metrics_df)
+
+if "benchmark_summary" in st.session_state:
+    st.dataframe(
+        st.session_state["benchmark_summary"].style.format({
+            "Recall@k": "{:.4f}",
+            "MRR@k": "{:.4f}",
+            "Hit Rate@k": "{:.4f}",
+        }),
+        width="stretch",
+        hide_index=True,
+    )
+
+st.markdown("---")
+st.subheader("Interactive BM25 Search Demo")
+st.markdown("Below is a simple simulation of corpus retrieval using [BM25 library](https://github.com/xhluca/bm25s).")
                                         
 template_questions = st.selectbox(
     "select from a question in finchbase dataset", 

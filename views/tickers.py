@@ -8,5 +8,5 @@ st.caption(f"Sidebar setting: retrieving {top_k} passages per question.")
 
 tickers = list_tickers("data")
 st.write(f"{len(tickers)} tickers indexed")
-st.dataframe({"ticker": tickers}, use_container_width=True)
+st.dataframe({"ticker": tickers}, width="stretch")
 
