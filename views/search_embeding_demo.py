@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 import pandas as pd
 import pymilvus
@@ -104,8 +105,62 @@ df = get_financebench_dataset().to_pandas()
 gold_indices, corpus, doc_to_idx, id_to_doc_meta = transform_df(df)
 all_questions = get_all_questions(df)
 
+HF_FINANCEBENCH_REPO = os.environ.get(
+    "HF_FINANCEBENCH_REPO", "ariesutiono/financebench-vector-db"
+)
+HF_METRICS_REPO = os.environ.get(
+    "HF_METRICS_REPO", "ariesutiono/financebench-vector-retrieval-metrics"
+)
+
+
+def ensure_financebench_milvus_db(path: str | Path) -> bool:
+    """Download the FinanceBench Milvus Lite DB from Hugging Face if not on disk.
+
+    Returns True if DB exists or was successfully downloaded, False otherwise.
+    """
+    path = Path(path)
+    collections_dir = path / "collections"
+    if collections_dir.is_dir() and any(collections_dir.iterdir()):
+        return True
+
+    try:
+        from huggingface_hub import snapshot_download
+
+        log.info(
+            "FinanceBench Milvus DB not found at %s; downloading from HF dataset %s",
+            path,
+            HF_FINANCEBENCH_REPO,
+        )
+        with st.spinner(
+            f"Downloading FinanceBench Milvus database from Hugging Face ({HF_FINANCEBENCH_REPO})..."
+        ):
+            snapshot_download(
+                repo_id=HF_FINANCEBENCH_REPO,
+                repo_type="dataset",
+                allow_patterns=["collections/**"],
+                local_dir=str(path),
+                token=os.environ.get("HF_TOKEN")
+                or os.environ.get("SEC_RAG_HF_TOKEN")
+                or None,
+            )
+        log.info("Downloaded FinanceBench Milvus DB to %s", path)
+        st.info(f"Downloaded FinanceBench Milvus DB from Hugging Face ({HF_FINANCEBENCH_REPO})")
+        return collections_dir.is_dir() and any(collections_dir.iterdir())
+    except Exception as e:
+        log.warning(
+            "Could not download FinanceBench Milvus DB from HF dataset %s: %s",
+            HF_FINANCEBENCH_REPO,
+            e,
+        )
+        st.warning(
+            f"Could not download Milvus DB from Hugging Face ({HF_FINANCEBENCH_REPO}): {e}. Will build index locally if needed."
+        )
+        return False
+
+
 @st.cache_resource
 def get_financebench_milvus_client(path: str) -> pymilvus.MilvusClient:
+    ensure_financebench_milvus_db(path)
     return pymilvus.MilvusClient(path)
 
 
@@ -273,12 +328,37 @@ Here, I will use the same evaluation metrics as BM25 (see BM25 page for more det
 # 5. Benchmark Evaluation
 st.subheader("Benchmark Evaluation")
 if st.button("Calculate average metrics (k = 1, 3, 5, 10)"):
-    with st.spinner("Calculating Dense Vector retrieval metrics across FinanceBench questions..."):
-        metrics_df_local_path = Path("metrics_df.csv")
-        if metrics_df_local_path.is_file():
-            st.info("loading metrics from local cache")
-            metrics_df = pd.read_csv(metrics_df_local_path)
-        else:
+    metrics_df_local_path = Path("metrics_df.csv")
+    metrics_df = None
+
+    # 1. Try to load from Hugging Face first
+    try:
+        from huggingface_hub import hf_hub_download
+
+        with st.spinner(f"Downloading metrics from Hugging Face ({HF_METRICS_REPO})..."):
+            hf_metrics_path = hf_hub_download(
+                repo_id=HF_METRICS_REPO,
+                filename="metrics_df.csv",
+                repo_type="dataset",
+                token=os.environ.get("HF_TOKEN")
+                or os.environ.get("SEC_RAG_HF_TOKEN")
+                or None,
+            )
+            metrics_df = pd.read_csv(hf_metrics_path)
+            st.info(f"Loaded metrics from Hugging Face ({HF_METRICS_REPO})")
+            metrics_df.to_csv(metrics_df_local_path, index=False)
+    except Exception as e:
+        log.warning("Could not download metrics from Hugging Face (%s): %s", HF_METRICS_REPO, e)
+
+    # 2. Check local file if Hugging Face failed / not found
+    if metrics_df is None and metrics_df_local_path.is_file():
+        st.info("Loaded metrics from local cache (metrics_df.csv)")
+        metrics_df = pd.read_csv(metrics_df_local_path)
+
+    # 3. Only if both fail / not found, recompute the metrics
+    if metrics_df is None:
+        st.info("Metrics not found on Hugging Face or locally. Computing metrics...")
+        with st.spinner("Calculating Dense Vector retrieval metrics across FinanceBench questions..."):
             k_values = [1, 3, 5, 10]
             progress_bar = st.progress(0.0)
             retrieved_indices, _ = search_questions(
@@ -290,7 +370,8 @@ if st.button("Calculate average metrics (k = 1, 3, 5, 10)"):
             )
             metrics_df = calculate_metrics(retrieved_indices, gold_indices, k_values=k_values)
             metrics_df.to_csv(metrics_df_local_path, index=False)
-        st.session_state["embed_benchmark_summary"] = get_avg_metrics(metrics_df)
+
+    st.session_state["embed_benchmark_summary"] = get_avg_metrics(metrics_df)
 
 if "embed_benchmark_summary" in st.session_state:
     st.dataframe(
