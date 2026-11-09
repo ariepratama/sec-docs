@@ -123,6 +123,31 @@ $$
   - When $|D| = \text{avgdl}$, $B = 1$ regardless of $b$.
 """)
 
+with st.expander("Code Implementation (Initialize, Index, and Retrieve)", expanded=False):
+    st.markdown(r"""
+### 1. Initialize BM25 Model
+Instantiate the `bm25s` retriever:
+```python
+import bm25s
+
+retriever = bm25s.BM25()
+```
+
+### 2. Tokenize & Index Corpus
+Tokenize document text with English stopwords removed and build the inverted index:
+```python
+corpus_tokens = bm25s.tokenize(corpus, stopwords="en")
+retriever.index(corpus_tokens)
+```
+
+### 3. Retrieve Top-$k$ Documents
+Tokenize the query and retrieve matching document indices with their BM25 scores:
+```python
+query_tokens = bm25s.tokenize(queries, stopwords="en")
+retrieved_indices, scores = retriever.retrieve(query_tokens, k=10)
+```
+""")
+
 with st.expander("Evaluation Metrics (Recall@k, MRR@k, Hit Rate@k)", expanded=False):
     st.markdown(r"""
 In this benchmark, we evaluate retrieval performance using standard Information Retrieval (IR) metrics:

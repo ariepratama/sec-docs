@@ -26,6 +26,7 @@ def retrieve_docs(
     if not query_vectors:
         return []
 
+    mclient.load_collection(collection_name)
     results = mclient.search(
         collection_name=collection_name,
         data=query_vectors[:1],
@@ -213,6 +214,9 @@ if needs_indexing:
             mclient.upsert(collection_name=collection_name, data=rows)
     st.success(f"Indexed {len(rows)} chunks into '{collection_name}'!")
 
+# 4. Ensure collection is loaded into memory before search/query operations
+mclient.load_collection(collection_name)
+
 if "query_text_embed" not in st.session_state:
     st.session_state["query_text_embed"] = ""
 
@@ -318,6 +322,39 @@ $$
 Milvus optimizes this nearest-neighbor search to return the top-$k$ ranked chunks with the highest cosine scores.
 """)
 
+with st.expander("Code Implementation (Embedding, Milvus Cosine, Retrieval)", expanded=False):
+    st.markdown(r"""
+### 1. Generating Embeddings
+Uses OpenAI-compatible client (`oai_client.embeddings.create`) with `BAAI/bge-large-en-v1.5`:
+```python
+resp = oai_client.embeddings.create(model=model_name, input=texts)
+query_vectors = [item.embedding for item in resp.data]
+```
+
+### 2. Milvus Collection with Cosine Similarity
+Initializes collection schema with `COSINE` metric for Maximum Inner Product Search:
+```python
+mclient.create_collection(
+    collection_name="financebench",
+    dimension=1024,
+    metric_type="COSINE",
+    id_type="string",
+    max_length=64,
+)
+```
+
+### 3. Vector Retrieval (MIPS Search)
+Executes nearest-neighbor search on Milvus Lite using the query vector:
+```python
+results = mclient.search(
+    collection_name="financebench",
+    data=[query_vector],
+    limit=10,
+    output_fields=["id", "doc_id", "text", "doc_name", "page_num"],
+)
+```
+""")
+
 st.markdown(r"""
 Here, I will use the same evaluation metrics as BM25 (see BM25 page for more details).
 
@@ -331,33 +368,33 @@ if st.button("Calculate average metrics (k = 1, 3, 5, 10)"):
     metrics_df_local_path = Path("metrics_df.csv")
     metrics_df = None
 
-    # 1. Try to load from Hugging Face first
-    try:
-        from huggingface_hub import hf_hub_download
-
-        with st.spinner(f"Downloading metrics from Hugging Face ({HF_METRICS_REPO})..."):
-            hf_metrics_path = hf_hub_download(
-                repo_id=HF_METRICS_REPO,
-                filename="metrics_df.csv",
-                repo_type="dataset",
-                token=os.environ.get("HF_TOKEN")
-                or os.environ.get("SEC_RAG_HF_TOKEN")
-                or None,
-            )
-            metrics_df = pd.read_csv(hf_metrics_path)
-            st.info(f"Loaded metrics from Hugging Face ({HF_METRICS_REPO})")
-            metrics_df.to_csv(metrics_df_local_path, index=False)
-    except Exception as e:
-        log.warning("Could not download metrics from Hugging Face (%s): %s", HF_METRICS_REPO, e)
-
-    # 2. Check local file if Hugging Face failed / not found
-    if metrics_df is None and metrics_df_local_path.is_file():
+    # 1. Check local file first (do not download if already in local)
+    if metrics_df_local_path.is_file():
         st.info("Loaded metrics from local cache (metrics_df.csv)")
         metrics_df = pd.read_csv(metrics_df_local_path)
+    else:
+        # 2. Not in local, download from Hugging Face
+        try:
+            from huggingface_hub import hf_hub_download
 
-    # 3. Only if both fail / not found, recompute the metrics
+            with st.spinner(f"Downloading metrics from Hugging Face ({HF_METRICS_REPO})..."):
+                hf_metrics_path = hf_hub_download(
+                    repo_id=HF_METRICS_REPO,
+                    filename="metrics_df.csv",
+                    repo_type="dataset",
+                    token=os.environ.get("HF_TOKEN")
+                    or os.environ.get("SEC_RAG_HF_TOKEN")
+                    or None,
+                )
+                metrics_df = pd.read_csv(hf_metrics_path)
+                st.info(f"Loaded metrics from Hugging Face ({HF_METRICS_REPO})")
+                metrics_df.to_csv(metrics_df_local_path, index=False)
+        except Exception as e:
+            log.warning("Could not download metrics from Hugging Face (%s): %s", HF_METRICS_REPO, e)
+
+    # 3. Only if both local and Hugging Face are not found / fail, recompute
     if metrics_df is None:
-        st.info("Metrics not found on Hugging Face or locally. Computing metrics...")
+        st.info("Metrics not found locally or on Hugging Face. Computing metrics...")
         with st.spinner("Calculating Dense Vector retrieval metrics across FinanceBench questions..."):
             k_values = [1, 3, 5, 10]
             progress_bar = st.progress(0.0)
