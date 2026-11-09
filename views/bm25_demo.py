@@ -40,28 +40,100 @@ if "query_text" not in st.session_state:
 
 
 st.markdown(f"""
-# FinchBench with BM25 retrieval 
+# FinanceBench with BM25 retrieval 
 
-This page is pre-loaded with the FinchBench dataset, which contains {len(corpus)} documents from financial statements, with {len(all_questions)} queries.
+This page is pre-loaded with the FinanceBench dataset, which contains {len(corpus)} documents from financial statements, with {len(all_questions)} queries.
 
 You may load the dataset yourself with the following code snippet (using huggingface datasets library)
-```
+```python
 from datasets import load_dataset
 load_dataset("PatronusAI/financebench", split="train")
 ```
-
 """)
-st.markdown(r"""
-In here, I will use a few evaluation metrics
 
-## 1. Recall@k
+with st.expander("Understanding TF-IDF (Foundations & Limitations)", expanded=False):
+    st.markdown(r"""
+Traditional lexical search evaluates relevance using **Term Frequency (TF)** and **Inverse Document Frequency (IDF)**:
+
+### 1. Term Frequency (TF)
+Measures how frequently query term $t$ appears in document $D$:
+$$
+\text{TF}(t, D) = \frac{f(t, D)}{|D|} \quad \text{or raw count} \quad f(t, D)
+$$
+
+### 2. Inverse Document Frequency (IDF)
+Penalizes ubiquitous stop-words (like *"the"*, *"is"*) and boosts informative, discriminative terms that appear in few documents:
+$$
+\text{IDF}(t) = \ln\left(\frac{N}{n(t)}\right)
+$$
+where:
+- $N$: Total number of documents in corpus $\mathcal{C}$.
+- $n(t)$: Number of documents containing query term $t$.
+
+### 3. Standard TF-IDF Score
+$$
+\text{Score}_{\text{TF-IDF}}(D, Q) = \sum_{t \in Q} \text{TF}(t, D) \times \text{IDF}(t)
+$$
+
+### 4. Limitations of Pure TF-IDF (Why BM25 is needed)
+1. **Unbounded Term Frequency (No Saturation)**: In raw TF-IDF, a document mentioning a term 20 times receives 20× the TF weight of one mentioning it once. In reality, term relevance exhibits **diminishing marginal returns**.
+2. **Length Bias**: Longer documents naturally contain higher word counts, unfairly skewing TF-IDF scores even when they are verbose and irrelevant.
+""")
+
+with st.expander("Okapi BM25: Mathematical Formulation & Scoring", expanded=False):
+    st.markdown(r"""
+**BM25 (Best Matching 25)** improves upon TF-IDF by introducing **term frequency saturation** and **document length normalization**.
+
+### 1. The Okapi BM25 Formula
+Given a query $Q = \{q_1, q_2, \dots, q_m\}$ and document $D$:
+$$
+\text{Score}_{\text{BM25}}(D, Q) = \sum_{i=1}^m \text{IDF}(q_i) \cdot \frac{f(q_i, D) \cdot (k_1 + 1)}{f(q_i, D) + k_1 \cdot \left(1 - b + b \cdot \frac{|D|}{\text{avgdl}}\right)}
+$$
+
+---
+
+### 2. Component Breakdown
+
+#### A. Probabilistic Inverse Document Frequency (IDF)
+Calculated with Robertson-Spärck Jones probabilistic weighting:
+$$
+\text{IDF}(q_i) = \ln\left(\frac{N - n(q_i) + 0.5}{n(q_i) + 0.5} + 1\right)
+$$
+- $N$: Total number of documents in the corpus.
+- $n(q_i)$: Number of documents containing query term $q_i$.
+- $+0.5$ and $+1$: Laplace smoothing terms that prevent division by zero and negative IDF scores for terms present in over half the corpus.
+
+#### B. Saturated Term Frequency & $k_1$ Parameter
+The fraction $\frac{f(q_i, D) \cdot (k_1 + 1)}{f(q_i, D) + \dots}$ controls how fast term frequency score saturates:
+- As $f(q_i, D) \to \infty$, the fraction asymptotically approaches $k_1 + 1$.
+- **$k_1$ (typically $1.2 \le k_1 \le 2.0$, default $1.5$)**: Determines saturation speed.
+  - Lower $k_1$: Rapid saturation; repeated terms contribute very little additional score.
+  - Higher $k_1$: Slower saturation; closer to linear term frequency.
+
+#### C. Document Length Normalization & $b$ Parameter
+The denominator scales by document length relative to average corpus length:
+$$
+B = 1 - b + b \cdot \frac{|D|}{\text{avgdl}}
+$$
+- $|D|$: Length of document $D$ (number of tokens/words).
+- $\text{avgdl} = \frac{1}{N}\sum_{d \in \mathcal{C}} |d|$: Average document length across the corpus.
+- **$b$ (typically $0.75$)**: Controls the strength of length normalization penalty ($0 \le b \le 1$).
+  - $b = 1.0$: Full length normalization (heavily penalizes verbose documents).
+  - $b = 0.0$: No length normalization (ignores document size).
+  - When $|D| = \text{avgdl}$, $B = 1$ regardless of $b$.
+""")
+
+with st.expander("Evaluation Metrics (Recall@k, MRR@k, Hit Rate@k)", expanded=False):
+    st.markdown(r"""
+In this benchmark, we evaluate retrieval performance using standard Information Retrieval (IR) metrics:
+
+### 1. Recall@k
 $$ 
     \text{Recall}@k = \frac{|\text{Retrieved}_{1:k} \cap \text{Relevant}|}{|\text{Relevant}|}
 $$
 Measures the proportion of all relevant evidence documents retrieved within the top-$k$ results. It is effective for verifying that the retriever doesn't leave critical context behind when answers require multiple pages.
 
-
-## 2. Reciprocal Rank (RR@k) & MRR@k
+### 2. Reciprocal Rank (RR@k) & MRR@k
 
 $$
     \text{RR}@k =  
@@ -76,7 +148,7 @@ $$
 $$
 Measures how high up the *first* relevant document appears, awarding a higher score when it lands near the top. It is effective because LLMs and users heavily prioritize the highest-ranked items and suffer when correct context is buried.
 
-## 3. Hit Rate / Success@k
+### 3. Hit Rate / Success@k
 $$
     \text{Hit}@k = 
         \begin{cases} 
@@ -85,7 +157,6 @@ $$
         \end{cases}
 $$
 Measures the percentage of queries that retrieved at least one relevant document in the top-$k$. It is effective as an intuitive baseline to confirm whether the retriever provides any usable answer context at all.
-
 """)
 
 st.subheader("Benchmark Evaluation")
