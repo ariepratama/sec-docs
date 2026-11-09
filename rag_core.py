@@ -168,13 +168,20 @@ Respond ONLY with JSON:
 def embed_text(text: str, model_name: str = None, batch_size: int = 16,
                costs: "CostTracker | None" = None) -> list[list[float]]:
     model_name = model_name or EMBEDDING_MODEL
-    chunks = chunk_text(text)
+    chunks = [c[:600] for c in chunk_text(text, max_chars=600, overlap=100)]
     log.debug("Embedding query (%d chars, %d chunks) with %s", len(text), len(chunks), model_name)
     query_vectors: list[list[float]] = []
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i : i + batch_size]
-        resp = oai_client.embeddings.create(model=model_name, input=batch)
-        query_vectors.extend(item.embedding for item in resp.data)
+        try:
+            resp = oai_client.embeddings.create(model=model_name, input=batch)
+            query_vectors.extend(item.embedding for item in resp.data)
+        except Exception as exc:
+            log.warning("Batch embedding failed (%s), retrying per-chunk with truncation: %s", exc, exc)
+            for single_chunk in batch:
+                safe_text = single_chunk[:500]
+                resp = oai_client.embeddings.create(model=model_name, input=[safe_text])
+                query_vectors.extend(item.embedding for item in resp.data)
         if costs is not None:
             usage = getattr(resp, "usage", None)
             tokens = getattr(usage, "prompt_tokens", None)

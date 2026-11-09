@@ -129,8 +129,8 @@ def read_markdown_from_disk(file_path: Path) -> str:
 
 
 @profiler.profile
-def chunk_text(text: str, max_chars: int = 1500, overlap: int = 200) -> list[str]:
-    """Splits text into overlapping character chunks (~350-400 tokens per 1500 chars)."""
+def chunk_text(text: str, max_chars: int = 600, overlap: int = 100) -> list[str]:
+    """Splits text into overlapping character chunks (~150-250 tokens per 600 chars)."""
     chunks = []
     start = 0
     text_len = len(text)

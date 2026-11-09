@@ -225,3 +225,5 @@ vector/
 # Production env
 .env.prod
 .env.prod.toml
+
+metrics_df.csv
